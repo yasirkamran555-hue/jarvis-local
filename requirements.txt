@@ -1,0 +1,18 @@
+gradio>=5.0,<6.0
+requests>=2.32,<3
+cryptography>=44.0
+python-dotenv>=1.0
+chromadb>=0.6,<2.0
+pyautogui>=0.9.54
+mss>=10.0
+uiautomation>=2.0; sys_platform == "win32"
+playwright>=1.50
+docker>=7.1
+faster-whisper>=1.1
+piper-tts>=1.2
+pytesseract>=0.3.13
+Pillow>=11.0
+mysql-connector-python>=9.0
+pyperclip>=1.9
+send2trash>=1.8
+PyInstaller>=6.11
