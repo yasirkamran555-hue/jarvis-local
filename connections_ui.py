@@ -6,6 +6,11 @@ import gradio as gr
 
 from security import delete_connection, list_connections, save_connection, set_connection_enabled
 from tools_connections import SUPPORTED_TYPES, test_connection
+from replit_mcp import (
+    forget_replit_connection,
+    replit_connection_status,
+    test_replit_connection,
+)
 
 TYPES = ["zimbra", "gmail", "mysql", "ftps", "ftp", "whatsapp", "github"]
 
@@ -38,6 +43,52 @@ def build_connections_tab():
         "Credentials are encrypted with Fernet before they are written to `connections.json`. "
         "The encryption key is stored in the local `.env` file and is excluded from Git."
     )
+    with gr.Accordion("Replit MCP · hosted projects", open=False):
+        gr.Markdown(
+            "Connect using Replit's OAuth sign-in. This stores OAuth tokens in the encrypted vault. "
+            "Creating or updating a hosted Replit app sends the approved plan to Replit."
+        )
+        replit_status = gr.Markdown(_replit_status_markdown())
+        with gr.Row():
+            connect_replit = gr.Button("Connect / Test Replit", variant="secondary")
+            forget_replit_button = gr.Button("Forget Replit credentials", variant="stop")
+        confirm_forget_replit = gr.Checkbox(
+            label="Confirm removal of saved Replit OAuth credentials",
+            value=False,
+        )
+        replit_result = gr.Markdown()
+
+        def connect_and_test_replit():
+            try:
+                result = test_replit_connection()
+                names = ", ".join(result["tools"])
+                return (
+                    f"**Connected.** Replit exposed {result['tool_count']} MCP tools."
+                    + (f"\n\n`{names}`" if names else ""),
+                    _replit_status_markdown(),
+                )
+            except Exception as exc:
+                return f"**Replit connection failed:** {exc}", _replit_status_markdown()
+
+        def forget_replit_action(confirm):
+            if not confirm:
+                return (
+                    "**Not removed.** Tick the confirmation box first.",
+                    _replit_status_markdown(),
+                    False,
+                )
+            result = forget_replit_connection()
+            return result["message"], _replit_status_markdown(), False
+
+        connect_replit.click(
+            connect_and_test_replit,
+            outputs=[replit_result, replit_status],
+        )
+        forget_replit_button.click(
+            forget_replit_action,
+            [confirm_forget_replit],
+            [replit_result, replit_status, confirm_forget_replit],
+        )
     with gr.Row():
         with gr.Column():
             name = gr.Textbox(label="Name", placeholder="Work Gmail")
@@ -137,3 +188,13 @@ def build_connections_tab():
         ),
         outputs=[table, connections],
     )
+
+
+def _replit_status_markdown() -> str:
+    try:
+        status = replit_connection_status()
+    except Exception as exc:
+        return f"**Vault unavailable** · {exc}"
+    if status["connected"]:
+        return f"**Connected** · {status['message']}"
+    return f"**Not connected** · {status['message']}"
