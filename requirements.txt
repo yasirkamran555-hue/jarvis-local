@@ -16,3 +16,4 @@ mysql-connector-python>=9.0
 pyperclip>=1.9
 send2trash>=1.8
 PyInstaller>=6.11
+mcp>=2.3,<3.0
