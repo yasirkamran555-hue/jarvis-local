@@ -42,8 +42,23 @@ if (Test-Path $installDir) {
     throw "The folder $installDir already exists. Rename it or choose another install location first."
 }
 
-gh api repos/yasirkamran555-hue/jarvis-local/zipball --output $zip
-if ($LASTEXITCODE -ne 0) { throw "Download failed. Check gh auth status and confirm this GitHub account can access the private repository." }
+$ghToken = gh auth token
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($ghToken)) {
+    throw "GitHub CLI is not signed in. Run gh auth login and confirm that account can access the private repository."
+}
+$headers = @{
+    Authorization = "Bearer $ghToken"
+    Accept = "application/vnd.github+json"
+}
+try {
+    Invoke-WebRequest -Uri "https://api.github.com/repos/yasirkamran555-hue/jarvis-local/zipball" -Headers $headers -OutFile $zip
+} finally {
+    $headers = $null
+    $ghToken = $null
+}
+if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) {
+    throw "The repository ZIP download failed. Run gh auth status and confirm that account can access the private repository."
+}
 
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage | Out-Null
