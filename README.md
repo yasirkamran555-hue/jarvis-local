@@ -51,7 +51,7 @@ $headers = @{
     Accept = "application/vnd.github+json"
 }
 try {
-    Invoke-WebRequest -Uri "https://api.github.com/repos/yasirkamran555-hue/jarvis-local/zipball" -Headers $headers -OutFile $zip
+    Invoke-WebRequest -Uri "https://api.github.com/repos/yasirkamran555-hue/jarvis-local/zipball" -Headers $headers -OutFile $zip -UseBasicParsing
 } finally {
     $headers = $null
     $ghToken = $null
