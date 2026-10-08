@@ -40,8 +40,11 @@ if ($LASTEXITCODE -ne 0) { throw "Python virtual environment creation failed." }
 
 $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
 & $VenvPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) { throw "Could not upgrade pip." }
 & $VenvPython -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) { throw "Could not install the Python requirements." }
 & $VenvPython -m playwright install chromium
+if ($LASTEXITCODE -ne 0) { throw "Could not install the Playwright Chromium browser." }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "workspace") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "skills") | Out-Null
