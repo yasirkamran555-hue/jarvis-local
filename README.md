@@ -8,7 +8,8 @@ JARVIS-LOCAL is a local-first desktop assistant that uses Ollama for offline pla
 - **Connections Hub:** create, test, save encrypted, enable/disable, list, and delete Zimbra/Gmail, MySQL, FTP/FTPS, WhatsApp Cloud API, and GitHub credentials.
 - **Skills:** successful multi-step plans produce local reusable recipes under `skills/`; only tool names and general steps are retained, not action arguments.
 - **Computer control:** screen capture, OCR, optional OmniParser endpoint, mouse, keyboard shortcuts, Windows UI Automation, workspace file management, Playwright page inspection, faster-whisper transcription, Piper speech output.
-- **Replit-style project tools:** create a local Python/static project, run a loopback preview, package a Python program into an executable, install a named PyPI package, and build/run constrained Docker containers.
+- **Replit MCP:** OAuth sign-in, create/list/search/update hosted Replit apps, ask questions, publish, and check publish status. OAuth registration and tokens are stored inside the Fernet-encrypted vault.
+- **Local project tools:** create a Python/static workspace, run a loopback preview, package a Python program into an executable, install a named PyPI package, and build/run constrained Docker containers.
 - **Connections tools:** test connections; send email/WhatsApp; read-only MySQL queries; workspace-limited FTP/FTPS uploads; list GitHub issues.
 
 ## Install on Windows
@@ -59,7 +60,8 @@ OmniParser is an optional local service, not a pip dependency. Set `OMNIPARSER_U
 - Screen files are kept under `workspace/screenshots`; OCR and OmniParser cannot read arbitrary filesystem paths.
 - The public Gradio share link is disabled. The app defaults to loopback and refuses a non-loopback bind unless an access password is configured.
 - Docker runs are isolated with no network, read-only root filesystems, dropped Linux capabilities, resource limits, and no mounted host paths.
-- `create_repl` creates a **local project workspace**; it does not create a hosted Replit account. Hosted Replit project creation requires a separate Replit-supported API or user-authorized integration.
+- `create_repl`, `update_repl`, and `publish_repl` call Replit's online MCP service after OAuth. The app description or change request in a reviewed plan is sent to Replit only when **Do it** is selected.
+- `create_local_project` creates a **local project workspace**. Replit OAuth credentials are encrypted with the same Fernet key as the connection vault. Use **Forget Replit credentials** to remove the local copy; revoke the authorization separately in your Replit account.
 - `live_preview` binds to loopback. It is for the same local machine, not an externally published web site.
 
 ## Connections
@@ -68,7 +70,7 @@ Use the Connections Hub form. Host values support `host` or `host:port` for mail
 
 ## Replit preview limitations
 
-This application controls the computer on which it runs. A Replit-hosted Linux preview cannot capture or control a user's Windows desktop, and it cannot reach Ollama running on that separate PC via `localhost`. Install and run JARVIS locally for those features. The app does not transmit prompts, memory, screenshots, or saved connections to a cloud model.
+This application controls the computer on which it runs. A Replit-hosted Linux preview cannot capture or control a user's Windows desktop, and it cannot reach Ollama running on that separate PC via `localhost`. Install and run JARVIS locally for those features. Normal planning uses the local Ollama model; Replit MCP calls require an internet connection and send only the specific approved Replit operation. JARVIS does not send local memory, screenshots, or saved connection records to Replit.
 
 ## Development checks
 
