@@ -106,10 +106,47 @@ def save_connection(record: dict[str, Any]) -> dict[str, Any]:
 def list_connections(include_disabled: bool = True) -> list[dict[str, Any]]:
     data = _read_vault()
     rows = []
-    for record in data.values():
+    for key, record in data.items():
+        if key == "_integrations" or not isinstance(record, dict) or "name" not in record:
+            continue
         if include_disabled or record.get("enabled", True):
             rows.append({key: value for key, value in record.items() if key != "password"})
     return sorted(rows, key=lambda item: item["name"].casefold())
+
+
+def get_integration_state(name: str) -> dict[str, Any]:
+    if not name or not name.replace("_", "").isalnum():
+        raise ValueError("Invalid integration name.")
+    data = _read_vault()
+    state = data.get("_integrations", {}).get(name, {})
+    if not isinstance(state, dict):
+        raise RuntimeError("Encrypted integration state has an invalid format.")
+    return state
+
+
+def set_integration_state(name: str, state: dict[str, Any]) -> None:
+    if not name or not name.replace("_", "").isalnum():
+        raise ValueError("Invalid integration name.")
+    if not isinstance(state, dict):
+        raise ValueError("Integration state must be an object.")
+    data = _read_vault()
+    integrations = data.setdefault("_integrations", {})
+    if not isinstance(integrations, dict):
+        raise RuntimeError("Encrypted integration state has an invalid format.")
+    integrations[name] = state
+    _write_vault(data)
+
+
+def delete_integration_state(name: str) -> None:
+    if not name or not name.replace("_", "").isalnum():
+        raise ValueError("Invalid integration name.")
+    data = _read_vault()
+    integrations = data.get("_integrations", {})
+    if isinstance(integrations, dict):
+        integrations.pop(name, None)
+        if not integrations:
+            data.pop("_integrations", None)
+        _write_vault(data)
 
 
 def get_connection(connection_id: str, require_enabled: bool = True) -> dict[str, Any]:
