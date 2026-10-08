@@ -26,7 +26,14 @@ TOOL_CATALOG = [
     {"name": "browser_visit", "args": {"url": "http or https URL"}, "description": "Fetch a web page using local headless Playwright."},
     {"name": "speak_text", "args": {"text": "short text"}, "description": "Create a local Piper speech file."},
     {"name": "audio_transcribe", "args": {"audio_path": "local audio file"}, "description": "Transcribe local audio using faster-whisper."},
-    {"name": "create_repl", "args": {"name": "project name", "template": "python or static"}, "description": "Create a local project workspace."},
+    {"name": "create_repl", "args": {"app_description": "app specification", "app_stack": "react_website/mobile_app/design/slides/animation/data_visualization/3d_game/document/spreadsheet", "app_name": "optional title"}, "description": "Create a hosted Replit app through Replit MCP. Requires OAuth and sends the approved plan to Replit."},
+    {"name": "create_local_project", "args": {"name": "project name", "template": "python or static"}, "description": "Create a local Python or static project workspace."},
+    {"name": "list_repls", "args": {"query": "optional title query", "limit": "optional 1-50"}, "description": "List Replit apps authorized for this account."},
+    {"name": "search_repls", "args": {"query": "optional title", "url": "optional app URL", "limit": "optional 1-50"}, "description": "Search authorized Replit apps."},
+    {"name": "ask_repl", "args": {"repl_id": "app ID", "question": "question for the app agent"}, "description": "Ask Replit Agent about an app without changing it."},
+    {"name": "update_repl", "args": {"repl_id": "app ID", "change_description": "requested app change"}, "description": "Start a Replit Agent update for an existing app."},
+    {"name": "publish_repl", "args": {"repl_id": "app ID"}, "description": "Publish or republish a Replit app. Requires explicit plan approval."},
+    {"name": "repl_publish_status", "args": {"repl_id": "app ID"}, "description": "Check the Replit app's publish status and URL."},
     {"name": "live_preview", "args": {"project": "project name"}, "description": "Start a loopback-only local project preview."},
     {"name": "stop_preview", "args": {"project": "project name"}, "description": "Stop a local preview."},
     {"name": "make_exe", "args": {"project": "project name", "entry_file": "python file"}, "description": "Build a project executable with PyInstaller."},
@@ -53,7 +60,11 @@ def _load_tools() -> dict[str, Callable]:
         whatsapp, whatsapp_send, zimbra_email,
     )
     from tools_replit import (
-        create_repl, docker_build, docker_run, docker_status, install_package, live_preview, make_exe, stop_preview,
+        create_local_project, docker_build, docker_run, docker_status, install_package, live_preview,
+        make_exe, stop_preview,
+    )
+    from replit_mcp import (
+        ask_repl, create_repl, list_repls, publish_repl, repl_publish_status, search_repls, update_repl,
     )
 
     def selected_test(connection_id):
@@ -76,6 +87,13 @@ def _load_tools() -> dict[str, Callable]:
         "speak_text": hands.speak_text,
         "audio_transcribe": hands.transcribe_audio,
         "create_repl": create_repl,
+        "create_local_project": create_local_project,
+        "list_repls": list_repls,
+        "search_repls": search_repls,
+        "ask_repl": ask_repl,
+        "update_repl": update_repl,
+        "publish_repl": publish_repl,
+        "repl_publish_status": repl_publish_status,
         "live_preview": live_preview,
         "stop_preview": stop_preview,
         "make_exe": make_exe,
