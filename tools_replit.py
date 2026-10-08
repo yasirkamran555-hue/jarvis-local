@@ -31,8 +31,8 @@ def _project_path(project: str) -> Path:
     return path
 
 
-def create_repl(name: str, template: str = "python") -> dict:
-    """Create a local project workspace; does not create a hosted Replit account."""
+def create_local_project(name: str, template: str = "python") -> dict:
+    """Create a local Python or static project workspace."""
     if template not in {"python", "static"}:
         raise ValueError("Supported templates are python and static.")
     path = _project_path(name)
