@@ -8,6 +8,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import security
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from pydantic import AnyUrl
+from replit_mcp import _VaultTokenStorage
 
 
 class VaultTests(unittest.TestCase):
@@ -56,6 +59,39 @@ class VaultTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             security.get_connection(row["id"])
         self.assertEqual(self.vault_file.read_bytes(), previous)
+
+    def test_replit_oauth_state_is_encrypted_and_hidden_from_connection_list(self):
+        secret = "replit-oauth-refresh-secret"
+        security.set_integration_state("replit_mcp", {
+            "tokens": {"refresh_token": secret},
+            "client_info": {"client_id": "local-client"},
+        })
+        raw_vault = self.vault_file.read_bytes()
+        self.assertNotIn(secret.encode(), raw_vault)
+        self.assertEqual(security.get_integration_state("replit_mcp")["tokens"]["refresh_token"], secret)
+        self.assertEqual(security.list_connections(), [])
+        security.delete_integration_state("replit_mcp")
+        self.assertEqual(security.get_integration_state("replit_mcp"), {})
+
+    def test_replit_oauth_sdk_models_round_trip_through_encrypted_vault(self):
+        import asyncio
+
+        storage = _VaultTokenStorage()
+        token = OAuthToken(access_token="access-secret", refresh_token="refresh-secret")
+        client_info = OAuthClientInformationFull(
+            client_id="local-oauth-client",
+            redirect_uris=[AnyUrl("http://127.0.0.1:8765/oauth/callback")],
+        )
+
+        async def save_and_load():
+            await storage.set_tokens(token)
+            await storage.set_client_info(client_info)
+            return await storage.get_tokens(), await storage.get_client_info()
+
+        loaded_token, loaded_client = asyncio.run(save_and_load())
+        self.assertEqual(loaded_token.refresh_token, "refresh-secret")
+        self.assertEqual(loaded_client.client_id, "local-oauth-client")
+        self.assertNotIn(b"refresh-secret", self.vault_file.read_bytes())
 
 
 if __name__ == "__main__":
