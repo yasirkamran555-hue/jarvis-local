@@ -14,27 +14,67 @@ JARVIS-LOCAL is a local-first desktop assistant that uses Ollama for offline pla
 
 ## Install on Windows
 
-1. Install Python **3.11**, Git, and Ollama. For computer vision OCR, install Tesseract OCR. Docker Desktop is optional.
-2. Open PowerShell in this directory and run:
+### Download the private GitHub project without Git
 
-   ```powershell
-   Set-ExecutionPolicy -Scope Process Bypass
-   .\install.ps1
-   ```
+The repository is private, so sign in with the GitHub account that has access. GitHub CLI downloads a ZIP archive; this does not use `git clone` or `git pull`.
 
-3. Start Ollama and pull at least one supported model:
+If GitHub CLI is not installed, run this once, close PowerShell, and open a new PowerShell window:
 
-   ```powershell
-   ollama pull qwen2.5-coder:14b
-   # Smaller alternative:
-   ollama pull llama3.2:3b
-   ```
+```powershell
+winget install --id GitHub.cli --exact --source winget
+```
 
-4. Launch:
+Sign in through the browser:
 
-   ```powershell
-   .\.venv\Scripts\python.exe main.py
-   ```
+```powershell
+gh auth login --hostname github.com --web --git-protocol https
+```
+
+Download and install the project. This stops rather than overwriting an existing `JARVIS-LOCAL` folder:
+
+```powershell
+$ErrorActionPreference = "Stop"
+$zip = Join-Path $env:TEMP "jarvis-local.zip"
+$stage = Join-Path $env:TEMP "jarvis-local-extract"
+$installDir = Join-Path $HOME "JARVIS-LOCAL"
+
+if (Test-Path $installDir) {
+    throw "The folder $installDir already exists. Rename it or choose another install location first."
+}
+
+gh api repos/yasirkamran555-hue/jarvis-local/zipball --output $zip
+if ($LASTEXITCODE -ne 0) { throw "Download failed. Check gh auth status and confirm this GitHub account can access the private repository." }
+
+if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+New-Item -ItemType Directory -Path $stage | Out-Null
+Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+$source = Get-ChildItem -Path $stage -Directory | Select-Object -First 1
+if (-not $source) { throw "The downloaded archive did not contain the project folder." }
+Move-Item -LiteralPath $source.FullName -Destination $installDir
+Remove-Item $stage -Recurse -Force
+
+Set-ExecutionPolicy -Scope Process Bypass -Force
+Set-Location $installDir
+.\install.ps1
+```
+
+The installer sets up Python **3.11**, the virtual environment, Python packages, and Playwright. It offers to install Ollama and download the two local models; model downloads need internet and several GB of disk space. Git is not required. Tesseract OCR and Docker Desktop are optional.
+
+### If the project folder is already on your PC
+
+Open PowerShell in the `JARVIS-LOCAL` folder and run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\install.ps1
+```
+
+After installation, launch JARVIS with:
+
+```powershell
+Set-Location (Join-Path $HOME "JARVIS-LOCAL")
+.\.venv\Scripts\python.exe main.py
+```
 
 The interface binds to `127.0.0.1` only. It opens in your browser at the local Gradio address shown in the terminal. Do not expose it to a network without setting `JARVIS_UI_PASSWORD` and configuring a trusted host.
 
