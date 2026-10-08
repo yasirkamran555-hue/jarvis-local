@@ -5,6 +5,7 @@ from __future__ import annotations
 import ftplib
 import imaplib
 import json
+import os
 import re
 import smtplib
 import ssl
@@ -252,8 +253,12 @@ def ftp_upload(connection: str | dict, local_path: str, remote_path: str) -> dic
         raise ValueError("FTP upload requires FTP or FTPS.")
     from hands import WORKSPACE_ROOT
     source = __import__("pathlib").Path(local_path).expanduser().resolve()
+    root = WORKSPACE_ROOT.resolve()
+    normalized_source = os.path.normcase(os.path.realpath(source))
+    normalized_root = os.path.normcase(os.path.realpath(root))
     try:
-        source.relative_to(WORKSPACE_ROOT)
+        if os.path.commonpath([normalized_source, normalized_root]) != normalized_root:
+            raise ValueError
     except ValueError as exc:
         raise ValueError("Only files inside the JARVIS workspace may be uploaded.") from exc
     if not source.is_file() or source.stat().st_size > 25 * 1024 * 1024:

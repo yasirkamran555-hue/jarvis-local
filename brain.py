@@ -15,12 +15,33 @@ class OllamaError(RuntimeError):
 
 
 class OllamaBrain:
-    PREFERRED_MODELS = ("qwen2.5-coder:14b", "llama3.2:3b")
+    PREFERRED_MODELS = (
+        "llama3.1:8b",
+        "llama3-small-ctx:latest",
+        "llama3.2:3b",
+        "qwen2.5-coder:14b",
+    )
     DEFAULT_URL = "http://127.0.0.1:11434"
 
     def __init__(self, base_url: str | None = None, timeout: int = 180):
         self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL") or self.DEFAULT_URL).rstrip("/")
         self.timeout = timeout
+        self.num_ctx = self._bounded_option("OLLAMA_NUM_CTX", 1024, 512, 131072)
+        self.num_predict = self._bounded_option("OLLAMA_NUM_PREDICT", 384, 64, 4096)
+        self.num_thread = self._bounded_option("OLLAMA_NUM_THREAD", 2, 1, 64)
+        self.keep_alive = os.getenv("OLLAMA_KEEP_ALIVE", "1m").strip()
+        if not self.keep_alive or len(self.keep_alive) > 32:
+            raise ValueError("OLLAMA_KEEP_ALIVE must be a non-empty Ollama duration.")
+
+    @staticmethod
+    def _bounded_option(name: str, default: int, minimum: int, maximum: int) -> int:
+        try:
+            value = int(os.getenv(name, str(default)))
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer.") from exc
+        if not minimum <= value <= maximum:
+            raise ValueError(f"{name} must be between {minimum} and {maximum}.")
+        return value
 
     def models(self) -> list[dict[str, Any]]:
         try:
@@ -50,7 +71,17 @@ class OllamaBrain:
         try:
             response = requests.post(
                 f"{self.base_url}/api/chat",
-                json={"model": selected, "messages": messages, "stream": False},
+                json={
+                    "model": selected,
+                    "messages": messages,
+                    "options": {
+                        "num_ctx": self.num_ctx,
+                        "num_predict": self.num_predict,
+                        "num_thread": self.num_thread,
+                    },
+                    "keep_alive": self.keep_alive,
+                    "stream": False,
+                },
                 timeout=self.timeout,
             )
             response.raise_for_status()
@@ -86,7 +117,6 @@ User request:
                 {"role": "system", "content": "You are a cautious local desktop assistant. Return valid JSON only."},
                 {"role": "user", "content": prompt},
             ],
-            model="qwen2.5-coder:14b",
         )
         cleaned = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", raw, flags=re.IGNORECASE)
         try:

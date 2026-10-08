@@ -4,7 +4,7 @@ JARVIS-LOCAL is a local-first desktop assistant that uses Ollama for offline pla
 
 ## What is implemented
 
-- **Chat / agent loop:** Qwen 2.5 Coder plans in JSON; the UI shows the proposed tool calls; **Do it** runs that queued plan; desktop actions capture a verification screenshot.
+- **Chat / agent loop:** local Ollama generates answers and JSON action plans. Jarvis chooses an installed model, preferring Llama 3.1 8B for PCs with limited memory; the UI shows proposed tool calls, and actions require approval.
 - **Connections Hub:** create, test, save encrypted, enable/disable, list, and delete Zimbra/Gmail, MySQL, FTP/FTPS, WhatsApp Cloud API, and GitHub credentials.
 - **Skills:** successful multi-step plans produce local reusable recipes under `skills/`; only tool names and general steps are retained, not action arguments.
 - **Computer control:** screen capture, OCR, optional OmniParser endpoint, mouse, keyboard shortcuts, Windows UI Automation, workspace file management, Playwright page inspection, faster-whisper transcription, Piper speech output.
@@ -88,14 +88,22 @@ After installation, launch JARVIS with:
 
 ```powershell
 Set-Location (Join-Path $HOME "JARVIS-LOCAL")
-.\.venv\Scripts\python.exe main.py
+.\run_jarvis.bat
 ```
 
-The interface binds to `127.0.0.1` only. It opens in your browser at the local Gradio address shown in the terminal. Do not expose it to a network without setting `JARVIS_UI_PASSWORD` and configuring a trusted host.
+This opens the native Windows voice assistant. To run the optional browser interface instead, use `.\.venv\Scripts\python.exe main.py`; it binds to `127.0.0.1` only.
+
+## Voice-first mode
+
+The native Windows window captures audio directly from the selected system microphone and transcribes it locally with faster-whisper. The animated orb changes while listening, recording, thinking, and speaking. Click the orb to pause or resume listening. Say commands such as “Hey Jarvis, open Notepad”, “maximize this window”, “switch to the previous window”, “type hello there”, “open https://example.com”, or “search Google for local voice assistants”; Jarvis describes the proposed action and waits for you to say “approve” before controlling the PC. Say “cancel” to discard it. Desktop actions use screen clicks, keyboard input, Windows UI Automation, an allowlist of apps (Calculator, Edge, Explorer, Notepad, Paint, Settings, Task Manager), standard window-management shortcuts, and validated browser URLs/search providers. Destructive or external actions still require approval. The default voice model is `tiny` for quicker local responses; set `JARVIS_VOICE_MODEL` to another supported Whisper model if desired. The first use downloads the model files. Spoken replies use the Windows system voice through SAPI.
+
+Jarvis answers ordinary questions with local Ollama. Say “search the web for …”, “look up …”, or ask for current/latest news to search online. It stores the resulting public page titles, snippets, and URLs in the local ChromaDB memory; it does not crawl continuously or download whole sites. Computer, file, and connected-account actions are proposed first and run only after you say “approve”; say “cancel” to discard them.
+
+For a contained live demonstration, ask Jarvis to create or update a local web project, then say “show the project.” Jarvis opens the loopback preview in a separate visible Chromium window with its own browser profile under `workspace/browser-profile`; it does not use the default browser or its saved login sessions. Jarvis can navigate/search there, inspect page text and controls, fill a uniquely labelled field, and click a uniquely named control. These actions still require spoken approval. Form submission and other consequential actions happen only when you explicitly approve the proposed click. Files written by `write_project_file` stay inside that project's folder under `workspace/projects`.
 
 ## Models and offline use
 
-Ollama runs at `http://127.0.0.1:11434` by default. Set `OLLAMA_BASE_URL` in `.env` only if your Ollama service uses a different local URL. Model files must be downloaded before disconnecting from the internet. Chroma uses deterministic local embeddings and does not download an embedding model. faster-whisper downloads its selected speech model on its first use; run that once while online before using it offline.
+Ollama runs at `http://127.0.0.1:11434` by default. Jarvis prefers installed `llama3.1:8b`, then `llama3-small-ctx:latest`, then the smaller `llama3.2:3b`, before falling back to larger models. Requests default to a 1,024-token context, at most 384 generated tokens, two CPU threads, and a one-minute model keep-alive to reduce memory and CPU pressure. Override these with `OLLAMA_BASE_URL`, `OLLAMA_NUM_CTX` (512–131,072), `OLLAMA_NUM_PREDICT` (64–4,096), `OLLAMA_NUM_THREAD` (1–64), and `OLLAMA_KEEP_ALIVE` in `.env`. Increasing context or generation limits uses more resources; lowering keep-alive releases model memory sooner but can make the next response slower. Chroma uses deterministic local embeddings and does not download an embedding model. faster-whisper downloads its selected speech model on its first use; run that once while online before using it offline. On Windows, local speech transcription requires the Microsoft Visual C++ 2015–2022 x64 Redistributable (`winget install --id Microsoft.VCRedist.2015+.x64`).
 
 OmniParser is an optional local service, not a pip dependency. Set `OMNIPARSER_URL` to its local HTTP parse endpoint. Piper speech requires a local `.onnx` voice model and `PIPER_MODEL` set to that file. OCR requires the Tesseract executable; set `TESSERACT_CMD` if it is not on `PATH`.
 
@@ -110,7 +118,7 @@ OmniParser is an optional local service, not a pip dependency. Set `OMNIPARSER_U
 
 ## Safety boundaries
 
-- Planning does not execute tools. The user must review a plan and click **Do it**.
+- Device, file, and connected-account actions require spoken approval before execution.
 - Desktop control requires a real interactive desktop and is unavailable in headless hosted sessions. Windows UI Automation is Windows-only.
 - Screen files are kept under `workspace/screenshots`; OCR and OmniParser cannot read arbitrary filesystem paths.
 - The public Gradio share link is disabled. The app defaults to loopback and refuses a non-loopback bind unless an access password is configured.
@@ -118,6 +126,7 @@ OmniParser is an optional local service, not a pip dependency. Set `OMNIPARSER_U
 - `create_repl`, `update_repl`, and `publish_repl` call Replit's online MCP service after OAuth. The app description or change request in a reviewed plan is sent to Replit only when **Do it** is selected.
 - `create_local_project` creates a **local project workspace**. Replit OAuth credentials are encrypted with the same Fernet key as the connection vault. Use **Forget Replit credentials** to remove the local copy; revoke the authorization separately in your Replit account.
 - `live_preview` binds to loopback. It is for the same local machine, not an externally published web site.
+- Jarvis's visible demo browser uses a separate Chromium profile in `workspace/browser-profile`; it has no access to your default browser's cookies, extensions, or saved logins.
 
 ## Connections
 

@@ -88,5 +88,6 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 
 Write-Host ""
 Write-Host "Installation complete. Start JARVIS with:"
-Write-Host "  .\.venv\Scripts\python.exe main.py"
+Write-Host "  .\run_jarvis.bat"
+Write-Host "  Or: .\.venv\Scripts\python.exe desktop_app.py"
 Write-Host "The first launch creates a local .env encryption key. Keep .env backed up and private."

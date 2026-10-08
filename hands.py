@@ -9,8 +9,9 @@ import subprocess
 import sys
 import time
 import webbrowser
+from functools import lru_cache
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 APP_DIR = Path(__file__).resolve().parent
 WORKSPACE_ROOT = Path(os.getenv("JARVIS_WORKSPACE", str(APP_DIR / "workspace"))).expanduser().resolve()
@@ -18,10 +19,26 @@ MAX_TEXT = 4000
 MAX_READ_BYTES = 512_000
 
 
+@lru_cache(maxsize=1)
+def _load_whisper_model(model_name: str, cache_dir: str):
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(
+        model_name,
+        device="cpu",
+        compute_type="int8",
+        download_root=cache_dir,
+    )
+
+
 def _workspace_path(relative_path: str) -> Path:
     candidate = (WORKSPACE_ROOT / relative_path).resolve()
+    root = WORKSPACE_ROOT.resolve()
+    normalized_candidate = os.path.normcase(os.path.realpath(candidate))
+    normalized_root = os.path.normcase(os.path.realpath(root))
     try:
-        candidate.relative_to(WORKSPACE_ROOT)
+        if os.path.commonpath([normalized_candidate, normalized_root]) != normalized_root:
+            raise ValueError
     except ValueError as exc:
         raise ValueError("Path is outside the configured JARVIS workspace.") from exc
     return candidate
@@ -78,6 +95,86 @@ def hotkey(keys: list[str]) -> dict:
         raise ValueError("Hotkey contains an unsupported key.")
     _pyautogui().hotkey(*normalized)
     return {"pressed": normalized}
+
+
+_APPLICATIONS = {
+    "calculator": "calc.exe",
+    "edge": "msedge.exe",
+    "explorer": "explorer.exe",
+    "file explorer": "explorer.exe",
+    "notepad": "notepad.exe",
+    "paint": "mspaint.exe",
+    "settings": "ms-settings:",
+    "task manager": "taskmgr.exe",
+}
+
+
+def open_application(application: str) -> dict:
+    """Open one explicitly allowlisted Windows desktop application."""
+    if sys.platform != "win32":
+        raise RuntimeError("Opening desktop applications is supported only on Windows.")
+    normalized = re.sub(r"\s+", " ", application.strip().casefold())
+    target = _APPLICATIONS.get(normalized)
+    if not target:
+        supported = ", ".join(sorted(_APPLICATIONS))
+        raise ValueError(f"Unsupported app. Choose one of: {supported}.")
+    try:
+        os.startfile(target)  # type: ignore[attr-defined]
+    except OSError as exc:
+        raise RuntimeError(f"Windows could not open {normalized}: {exc}") from exc
+    return {"opened_application": normalized}
+
+
+def open_url(url: str) -> dict:
+    """Open a validated HTTP(S) URL in the user's default desktop browser."""
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or any(char in url for char in "\r\n\x00"):
+        raise ValueError("Provide a complete http or https URL.")
+    try:
+        opened = webbrowser.open(url, new=2)
+    except Exception as exc:
+        raise RuntimeError(f"Could not open the URL in the desktop browser: {exc}") from exc
+    if not opened:
+        raise RuntimeError("The default desktop browser did not accept the URL.")
+    return {"opened_url": url}
+
+
+def search_in_browser(query: str, engine: str = "duckduckgo") -> dict:
+    """Open a search results page in the desktop browser using a known search provider."""
+    query = query.strip()
+    if not query or len(query) > 300:
+        raise ValueError("Browser search query must contain 1–300 characters.")
+    search_urls = {
+        "bing": "https://www.bing.com/search?q=",
+        "duckduckgo": "https://duckduckgo.com/?q=",
+        "google": "https://www.google.com/search?q=",
+    }
+    provider = engine.casefold().strip()
+    if provider not in search_urls:
+        raise ValueError("Browser search engine must be Google, Bing, or DuckDuckGo.")
+    return open_url(search_urls[provider] + quote_plus(query))
+
+
+def manage_windows(action: str) -> dict:
+    """Perform a small, explicit set of standard Windows window-management shortcuts."""
+    if sys.platform != "win32":
+        raise RuntimeError("Window management is supported only on Windows.")
+    shortcuts = {
+        "maximize": ["win", "up"],
+        "minimize": ["win", "down"],
+        "restore": ["win", "shift", "m"],
+        "show_desktop": ["win", "d"],
+        "switch_window": ["alt", "tab"],
+        "switch_application": ["alt", "tab"],
+        "switch_back": ["alt", "shift", "tab"],
+    }
+    normalized = action.casefold().strip().replace(" ", "_")
+    keys = shortcuts.get(normalized)
+    if keys is None:
+        supported = ", ".join(sorted(shortcuts))
+        raise ValueError(f"Unsupported window action. Choose one of: {supported}.")
+    _pyautogui().hotkey(*keys)
+    return {"window_action": normalized, "keys": keys}
 
 
 def get_ui_controls(max_depth: int = 3) -> list[dict]:
@@ -266,12 +363,7 @@ def transcribe_audio(audio_path: str, model_size: str | None = None) -> dict:
     cache_dir = APP_DIR / "workspace" / "models" / "whisper"
     cache_dir.mkdir(parents=True, exist_ok=True)
     try:
-        model = WhisperModel(
-            model_name,
-            device="cpu",
-            compute_type="int8",
-            download_root=str(cache_dir),
-        )
+        model = _load_whisper_model(model_name, str(cache_dir))
         segments, info = model.transcribe(str(path), vad_filter=True)
         transcript = " ".join(segment.text.strip() for segment in segments).strip()
     except Exception as exc:

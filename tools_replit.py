@@ -13,6 +13,7 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 PROJECTS_DIR = Path(os.getenv("JARVIS_PROJECTS_DIR", str(APP_DIR / "workspace" / "projects"))).expanduser().resolve()
 _PREVIEWS: dict[str, subprocess.Popen] = {}
+_PREVIEW_URLS: dict[str, str] = {}
 
 
 def _slug(value: str) -> str:
@@ -24,8 +25,12 @@ def _slug(value: str) -> str:
 
 def _project_path(project: str) -> Path:
     path = (PROJECTS_DIR / _slug(project)).resolve()
+    root = PROJECTS_DIR.resolve()
+    normalized_path = os.path.normcase(os.path.realpath(path))
+    normalized_root = os.path.normcase(os.path.realpath(root))
     try:
-        path.relative_to(PROJECTS_DIR)
+        if os.path.commonpath([normalized_path, normalized_root]) != normalized_root:
+            raise ValueError
     except ValueError as exc:
         raise ValueError("Project path is outside the local projects directory.") from exc
     return path
@@ -57,6 +62,29 @@ def create_local_project(name: str, template: str = "python") -> dict:
     return {"project": path.name, "path": str(path), "template": template}
 
 
+def write_project_file(project: str, relative_path: str, content: str) -> dict:
+    """Write UTF-8 text to a file contained by one Jarvis local project."""
+    root = _project_path(project)
+    if not root.is_dir():
+        raise FileNotFoundError(f"Local project does not exist: {project}")
+    if not isinstance(relative_path, str) or not relative_path.strip() or len(relative_path) > 240:
+        raise ValueError("Provide a project-relative file path up to 240 characters.")
+    if not isinstance(content, str):
+        raise ValueError("Project file content must be text.")
+    if len(content.encode("utf-8")) > 500_000:
+        raise ValueError("Project file content must be 500 KB or smaller.")
+    target = (root / relative_path).resolve()
+    try:
+        target.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError("Project file path must stay inside its local project.") from exc
+    if not target.is_file() and target.exists():
+        raise ValueError("Project file target must be a regular file.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return {"project": root.name, "file": str(target.relative_to(root)), "bytes": target.stat().st_size}
+
+
 def live_preview(project: str, port: int | None = None) -> dict:
     path = _project_path(project)
     if not path.is_dir():
@@ -82,7 +110,9 @@ def live_preview(project: str, port: int | None = None) -> dict:
         try:
             with socket.create_connection(("127.0.0.1", selected_port), timeout=0.2):
                 _PREVIEWS[path.name] = process
-                return {"project": path.name, "url": f"http://127.0.0.1:{selected_port}", "pid": process.pid}
+                url = f"http://127.0.0.1:{selected_port}"
+                _PREVIEW_URLS[path.name] = url
+                return {"project": path.name, "url": url, "pid": process.pid}
         except OSError:
             time.sleep(0.1)
     process.terminate()
@@ -102,7 +132,24 @@ def stop_preview(project: str) -> dict:
         process.kill()
         process.wait(timeout=2)
     _PREVIEWS.pop(name, None)
+    _PREVIEW_URLS.pop(name, None)
     return {"stopped": True, "project": name}
+
+
+def show_project(project: str) -> dict:
+    """Start a local preview and open it in Jarvis's isolated visible browser."""
+    name = _slug(project)
+    process = _PREVIEWS.get(name)
+    if process is None or process.poll() is not None:
+        _PREVIEWS.pop(name, None)
+        _PREVIEW_URLS.pop(name, None)
+        preview = live_preview(name)
+    else:
+        preview = {"project": name, "url": _PREVIEW_URLS[name], "pid": process.pid}
+    from demo_browser import open_demo_url
+
+    browser = open_demo_url(preview["url"])
+    return {**preview, "browser": browser}
 
 
 def make_exe(project: str, entry_file: str = "main.py") -> dict:

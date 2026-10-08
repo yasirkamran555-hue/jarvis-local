@@ -17,6 +17,10 @@ TOOL_CATALOG = [
     {"name": "desktop_click", "args": {"x": "int", "y": "int", "button": "optional"}, "description": "Click a screen coordinate."},
     {"name": "desktop_type", "args": {"text": "string"}, "description": "Type text into the focused application."},
     {"name": "desktop_hotkey", "args": {"keys": ["key names"]}, "description": "Press a supported hotkey."},
+    {"name": "manage_windows", "args": {"action": "maximize/minimize/restore/show_desktop/switch_window/switch_back"}, "description": "Manage or switch foreground Windows using standard keyboard shortcuts."},
+    {"name": "open_application", "args": {"application": "calculator/notepad/paint/edge/explorer/file explorer/settings/task manager"}, "description": "Open one allowlisted Windows desktop application."},
+    {"name": "open_url", "args": {"url": "http or https URL"}, "description": "Open a URL in the user's desktop browser."},
+    {"name": "search_in_browser", "args": {"query": "search terms", "engine": "optional google/bing/duckduckgo"}, "description": "Open a web search in the user's desktop browser."},
     {"name": "ui_controls", "args": {"max_depth": "optional int"}, "description": "Inspect Windows UI Automation controls."},
     {"name": "ui_click", "args": {"name": "exact control name"}, "description": "Click one uniquely named Windows control."},
     {"name": "file_list", "args": {"relative_path": "workspace-relative path"}, "description": "List files inside the JARVIS workspace."},
@@ -28,6 +32,7 @@ TOOL_CATALOG = [
     {"name": "audio_transcribe", "args": {"audio_path": "local audio file"}, "description": "Transcribe local audio using faster-whisper."},
     {"name": "create_repl", "args": {"app_description": "app specification", "app_stack": "react_website/mobile_app/design/slides/animation/data_visualization/3d_game/document/spreadsheet", "app_name": "optional title"}, "description": "Create a hosted Replit app through Replit MCP. Requires OAuth and sends the approved plan to Replit."},
     {"name": "create_local_project", "args": {"name": "project name", "template": "python or static"}, "description": "Create a local Python or static project workspace."},
+    {"name": "write_project_file", "args": {"project": "project name", "relative_path": "file path inside project", "content": "UTF-8 text"}, "description": "Create or update a text file strictly inside Jarvis's own local project workspace."},
     {"name": "list_repls", "args": {"query": "optional title query", "limit": "optional 1-50"}, "description": "List Replit apps authorized for this account."},
     {"name": "search_repls", "args": {"query": "optional title", "url": "optional app URL", "limit": "optional 1-50"}, "description": "Search authorized Replit apps."},
     {"name": "ask_repl", "args": {"repl_id": "app ID", "question": "question for the app agent"}, "description": "Ask Replit Agent about an app without changing it."},
@@ -35,7 +40,13 @@ TOOL_CATALOG = [
     {"name": "publish_repl", "args": {"repl_id": "app ID"}, "description": "Publish or republish a Replit app. Requires explicit plan approval."},
     {"name": "repl_publish_status", "args": {"repl_id": "app ID"}, "description": "Check the Replit app's publish status and URL."},
     {"name": "live_preview", "args": {"project": "project name"}, "description": "Start a loopback-only local project preview."},
+    {"name": "show_project", "args": {"project": "project name"}, "description": "Open a local project's loopback preview in Jarvis's separate visible Chromium window and profile."},
     {"name": "stop_preview", "args": {"project": "project name"}, "description": "Stop a local preview."},
+    {"name": "open_demo_url", "args": {"url": "http or https URL"}, "description": "Open a page in Jarvis's dedicated visible Chromium window, isolated from the user's everyday browser."},
+    {"name": "search_demo_web", "args": {"query": "search terms", "engine": "optional google/bing/duckduckgo"}, "description": "Search in Jarvis's separate visible Chromium window."},
+    {"name": "inspect_demo_page", "args": {}, "description": "Read visible text, links, and buttons from the current Jarvis demo browser page."},
+    {"name": "click_demo_element", "args": {"text": "exact accessible element name", "role": "optional button/link/checkbox/radio/tab/menuitem"}, "description": "Click one uniquely named element in the Jarvis demo browser after approval."},
+    {"name": "fill_demo_field", "args": {"label": "exact field label or placeholder", "text": "text to enter"}, "description": "Fill one uniquely labelled field in the Jarvis demo browser after approval; does not submit."},
     {"name": "make_exe", "args": {"project": "project name", "entry_file": "python file"}, "description": "Build a project executable with PyInstaller."},
     {"name": "install_package", "args": {"package": "PyPI package name", "project": "optional project"}, "description": "Install one named PyPI package."},
     {"name": "docker_status", "args": {}, "description": "Check local Docker availability."},
@@ -61,7 +72,10 @@ def _load_tools() -> dict[str, Callable]:
     )
     from tools_replit import (
         create_local_project, docker_build, docker_run, docker_status, install_package, live_preview,
-        make_exe, stop_preview,
+        make_exe, show_project, stop_preview, write_project_file,
+    )
+    from demo_browser import (
+        click_demo_element, fill_demo_field, inspect_demo_page, open_demo_url, search_demo_web,
     )
     from replit_mcp import (
         ask_repl, create_repl, list_repls, publish_repl, repl_publish_status, search_repls, update_repl,
@@ -77,6 +91,10 @@ def _load_tools() -> dict[str, Callable]:
         "desktop_click": hands.click_screen,
         "desktop_type": hands.type_text,
         "desktop_hotkey": hands.hotkey,
+        "manage_windows": hands.manage_windows,
+        "open_application": hands.open_application,
+        "open_url": hands.open_url,
+        "search_in_browser": hands.search_in_browser,
         "ui_controls": hands.get_ui_controls,
         "ui_click": hands.click_ui_control,
         "file_list": hands.list_files,
@@ -88,6 +106,7 @@ def _load_tools() -> dict[str, Callable]:
         "audio_transcribe": hands.transcribe_audio,
         "create_repl": create_repl,
         "create_local_project": create_local_project,
+        "write_project_file": write_project_file,
         "list_repls": list_repls,
         "search_repls": search_repls,
         "ask_repl": ask_repl,
@@ -95,7 +114,13 @@ def _load_tools() -> dict[str, Callable]:
         "publish_repl": publish_repl,
         "repl_publish_status": repl_publish_status,
         "live_preview": live_preview,
+        "show_project": show_project,
         "stop_preview": stop_preview,
+        "open_demo_url": open_demo_url,
+        "search_demo_web": search_demo_web,
+        "inspect_demo_page": inspect_demo_page,
+        "click_demo_element": click_demo_element,
+        "fill_demo_field": fill_demo_field,
         "make_exe": make_exe,
         "install_package": install_package,
         "docker_status": docker_status,
@@ -158,7 +183,10 @@ class Agent:
             raise ValueError("Invalid or oversized plan.")
         tools = _load_tools()
         results = []
-        desktop_tools = {"desktop_click", "desktop_type", "desktop_hotkey", "ui_click"}
+        desktop_tools = {
+            "desktop_click", "desktop_type", "desktop_hotkey",
+            "manage_windows", "open_application", "open_url", "search_in_browser", "ui_click",
+        }
         try:
             for index, step in enumerate(steps, start=1):
                 name = step["tool"]

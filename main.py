@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import uuid
+import base64
+import binascii
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,16 +22,104 @@ from connections_ui import build_connections_tab
 from memory import MemoryStore, list_skills
 
 APP_CSS = """
-.jarvis-floating-widget {
-    position: fixed !important;
-    right: 18px;
-    bottom: 16px;
-    z-index: 1000;
-    width: min(360px, calc(100vw - 36px));
-    border: 1px solid var(--border-color-primary);
-    border-radius: 14px;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, .22);
-    background: var(--background-fill-primary);
+html, body, .gradio-container {
+    min-height: 100% !important;
+    background: #050b14 !important;
+}
+.gradio-container {
+    max-width: none !important;
+    padding: 0 !important;
+}
+#jarvis-voice-input, #jarvis-voice-reply, #jarvis-audio-payload,
+#jarvis-transcription-result, #jarvis-transcribe-button, #jarvis-voice-submit,
+.built-with, button.settings, footer {
+    display: none !important;
+}
+#jarvis-voice-ui {
+    display: grid;
+    min-height: 100vh;
+    place-items: center;
+    overflow: hidden;
+}
+#jarvis-orb {
+    position: relative;
+    display: grid;
+    width: min(62vw, 340px);
+    aspect-ratio: 1;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+#jarvis-orb:focus-visible {
+    outline: 2px solid #8cecff;
+    outline-offset: 10px;
+}
+.jarvis-ring, .jarvis-core {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+}
+.jarvis-ring {
+    inset: 8%;
+    border: 1px solid rgba(72, 207, 255, .32);
+    box-shadow: 0 0 32px rgba(0, 174, 255, .14), inset 0 0 32px rgba(0, 174, 255, .1);
+    animation: jarvis-orbit 8s linear infinite, jarvis-pulse 3.2s ease-in-out infinite;
+}
+.jarvis-ring:nth-child(2) {
+    inset: 19%;
+    border-color: rgba(105, 232, 255, .62);
+    border-style: dashed;
+    animation-duration: 14s, 2.4s;
+    animation-direction: reverse, normal;
+}
+.jarvis-core {
+    inset: 29%;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(156, 241, 255, .8);
+    background: radial-gradient(circle at 35% 30%, #287ba7, #0a2342 62%, #071222);
+    box-shadow: 0 0 55px rgba(0, 195, 255, .42), inset 0 0 35px rgba(109, 228, 255, .25);
+    color: #d9fbff;
+    font: 500 clamp(48px, 12vw, 96px)/1 sans-serif;
+    text-shadow: 0 0 22px #52dbff;
+    animation: jarvis-core 3s ease-in-out infinite;
+}
+#jarvis-orb[data-state="listening"] .jarvis-ring {
+    border-color: rgba(55, 255, 174, .75);
+    box-shadow: 0 0 45px rgba(55, 255, 174, .3), inset 0 0 35px rgba(55, 255, 174, .16);
+    animation-duration: 2s, .8s;
+}
+#jarvis-orb[data-state="thinking"] .jarvis-ring {
+    border-color: rgba(255, 188, 74, .8);
+    animation-duration: 1.2s, 1s;
+}
+#jarvis-orb[data-state="speaking"] .jarvis-ring {
+    border-color: rgba(215, 120, 255, .85);
+    box-shadow: 0 0 55px rgba(200, 90, 255, .36), inset 0 0 40px rgba(200, 90, 255, .18);
+    animation-duration: .65s, .55s;
+}
+#jarvis-orb[data-state="error"] .jarvis-ring {
+    border-color: rgba(255, 90, 90, .9);
+    animation: none;
+}
+.jarvis-mic {
+    position: absolute;
+    right: 12%;
+    bottom: 15%;
+    z-index: 2;
+    width: 36px;
+    height: 36px;
+    color: #a9efff;
+    filter: drop-shadow(0 0 8px #25bfea);
+}
+@keyframes jarvis-orbit { to { transform: rotate(360deg); } }
+@keyframes jarvis-pulse { 50% { opacity: .45; transform: scale(.96); } }
+@keyframes jarvis-core { 50% { box-shadow: 0 0 75px rgba(0, 195, 255, .65), inset 0 0 45px rgba(109, 228, 255, .38); } }
+@media (prefers-reduced-motion: reduce) {
+    .jarvis-ring, .jarvis-core { animation-duration: 12s !important; }
 }
 """
 
@@ -65,6 +157,142 @@ def _render_plan(plan: dict) -> str:
         lines.append(f"   `{args}`")
     lines.extend(["", "Nothing runs until you select **Do it**. Review each action first."])
     return "\n".join(lines)
+
+
+def _voice_turn(message: str, state: dict | None):
+    state = dict(state or {})
+    text = (message or "").strip()
+    if not text:
+        reply = "I didn't catch that. Please say it again."
+        return json.dumps({"id": uuid.uuid4().hex, "text": reply}), state
+
+    pending = state.get("pending")
+    normalized = text.casefold().strip(" .,!?:;")
+    if pending:
+        if normalized in {"jarvis approve", "approve", "do it", "go ahead", "confirm"}:
+            try:
+                result = Agent().execute(pending)
+                reply = f"Done. {len(result['results'])} action steps completed."
+            except Exception as exc:
+                reply = f"I couldn't complete that task: {exc}"
+            state["pending"] = None
+            return json.dumps({"id": uuid.uuid4().hex, "text": reply}), state
+        if normalized in {"cancel", "cancel it", "never mind", "nevermind"}:
+            state["pending"] = None
+            reply = "Cancelled. I did not run the actions."
+            return json.dumps({"id": uuid.uuid4().hex, "text": reply}), state
+        reply = "I have an action waiting for approval. Say approve to run it, or cancel."
+        return json.dumps({"id": uuid.uuid4().hex, "text": reply}), state
+
+    from brain import OllamaBrain
+
+    brain = OllamaBrain()
+    conversation = list(state.get("conversation", []))
+
+    def save_turn(answer: str) -> None:
+        conversation.extend([
+            {"role": "user", "content": text},
+            {"role": "assistant", "content": answer},
+        ])
+        state["conversation"] = conversation[-12:]
+
+    search_match = re.search(
+        r"\b(search (?:the )?(?:web|internet)|look up|find online|on the internet|"
+        r"latest|current|breaking news|news today)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if search_match:
+        query = re.sub(
+            r"^\s*(?:jarvis[, ]*)?(?:search (?:the )?(?:web|internet)(?: for)?|"
+            r"look up|find online)\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip(" .?!")
+        query = query or text
+        try:
+            from web_search import search_web
+            results = search_web(query, limit=5)["results"]
+        except Exception as exc:
+            reply = f"I couldn't complete that web search: {exc}"
+            return json.dumps({"id": uuid.uuid4().hex, "text": reply}), state
+        sources = "\n".join(
+            f"[{index}] {item['title']}: {item['snippet']} Source: {item['url']}"
+            for index, item in enumerate(results, start=1)
+        )
+        try:
+            reply = brain.chat([
+                {"role": "system", "content": "Answer briefly using the provided current web results. Cite source numbers and do not invent facts."},
+                *conversation[-8:],
+                {"role": "user", "content": f"Question: {text}\n\nWeb results:\n{sources}"},
+            ])
+        except Exception as exc:
+            reply = f"I found and saved these web sources, but the local AI could not summarize them: {exc}. {sources[:1200]}"
+        save_turn(reply)
+        return json.dumps({"id": uuid.uuid4().hex, "text": reply}), state
+
+    action_request = re.search(
+        r"^\s*(?:(?:hey|okay|ok)\s+)?(?:jarvis[, ]*)?(?:please\s+)?"
+        r"(?:can you\s+|could you\s+|would you\s+)?"
+        r"(open|click|press|switch|type|dictate|write|create|delete|remove|send|email|upload|publish|"
+        r"install|run|launch|build|maximize|minimize|restore|search|change|update|download|move|copy|save|"
+        r"navigate|browse|inspect|show|fill|preview|demonstrate)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if action_request:
+        try:
+            plan = Agent().plan(text)
+            if plan.get("steps"):
+                state["pending"] = plan
+                actions = ", ".join(step["tool"].replace("_", " ") for step in plan["steps"])
+                reply = f"{plan['summary']} I propose: {actions}. Say approve to run these actions, or cancel."
+            else:
+                reply = plan.get("summary", "I couldn't identify a safe action.")
+        except Exception as exc:
+            reply = f"I couldn't prepare that action: {exc}"
+        return json.dumps({"id": uuid.uuid4().hex, "text": reply}), state
+
+    try:
+        memories = MemoryStore().recall(text)
+    except Exception:
+        memories = []
+    context = "\n".join(memories) or "(none)"
+    try:
+        reply = brain.chat([
+            {"role": "system", "content": "You are Jarvis, a helpful local voice assistant. Answer briefly and naturally. Do not claim to perform actions."},
+            {"role": "system", "content": f"Relevant saved local research:\n{context}"},
+            *conversation[-10:],
+            {"role": "user", "content": text},
+        ])
+    except Exception as exc:
+        reply = f"I can't answer right now because the local AI is unavailable: {exc}"
+    save_turn(reply)
+    return json.dumps({"id": uuid.uuid4().hex, "text": reply}), state
+
+
+def _transcribe_voice_clip(encoded_audio: str) -> str:
+    request_id = uuid.uuid4().hex
+    output_dir = APP_DIR / "workspace" / "audio"
+    audio_path = None
+    try:
+        audio = base64.b64decode(encoded_audio, validate=True)
+        if not audio or len(audio) > 25 * 1024 * 1024:
+            raise ValueError("Audio recording is empty or exceeds 25 MB.")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = output_dir / f"voice-{request_id}.webm"
+        audio_path.write_bytes(audio)
+        from hands import transcribe_audio
+
+        model_size = os.getenv("JARVIS_VOICE_MODEL", "tiny")
+        transcript = transcribe_audio(str(audio_path), model_size=model_size)["text"].strip()
+        return json.dumps({"id": request_id, "text": transcript})
+    except (binascii.Error, OSError, RuntimeError, ValueError) as exc:
+        return json.dumps({"id": request_id, "error": f"Local speech transcription failed: {exc}"})
+    finally:
+        if audio_path:
+            audio_path.unlink(missing_ok=True)
 
 
 def _chat_submit(message: str, history: list | None, state: dict | None):
@@ -122,87 +350,262 @@ def _refresh_skills():
 
 
 def create_app() -> gr.Blocks:
-    with gr.Blocks(title="JARVIS-LOCAL", theme=gr.themes.Soft(), css=APP_CSS) as demo:
-        gr.Markdown(
-            "# JARVIS-LOCAL\n"
-            "A local-first assistant for Ollama, desktop workflows, and encrypted connections. "
-            "Requests are planned before any tool runs."
+    voice_js = r"""() => {
+        const button = document.querySelector("#jarvis-orb");
+        const input = document.querySelector("#jarvis-voice-input textarea, #jarvis-voice-input input");
+        const audioPayload = document.querySelector("#jarvis-audio-payload textarea, #jarvis-audio-payload input");
+        const transcriptionResult = document.querySelector("#jarvis-transcription-result textarea, #jarvis-transcription-result input");
+        const transcribeButton = document.querySelector("#jarvis-transcribe-button");
+        const submit = document.querySelector("#jarvis-voice-submit");
+        const reply = document.querySelector("#jarvis-voice-reply textarea, #jarvis-voice-reply input");
+        if (!button || !input || !audioPayload || !transcriptionResult || !transcribeButton || !submit || !reply || button.dataset.initialized) return;
+        button.dataset.initialized = "true";
+        let active = false;
+        let busy = false;
+        let lastReply = "";
+        let stream = null;
+        let audioContext = null;
+        let analyser = null;
+        let recorder = null;
+        let chunks = [];
+        let lastSoundAt = 0;
+        let recordStartedAt = 0;
+        let loudFrames = 0;
+        let awaitingTranscription = false;
+        let lastTranscriptionResult = "";
+        const setState = state => { button.dataset.state = state; };
+        const setInput = value => {
+            const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value").set;
+            setter.call(input, value);
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        const monitor = () => {
+            if (!active || (busy && !recorder) || !analyser) return;
+            const samples = new Uint8Array(analyser.fftSize);
+            analyser.getByteTimeDomainData(samples);
+            let energy = 0;
+            for (const sample of samples) {
+                const value = (sample - 128) / 128;
+                energy += value * value;
+            }
+            const level = Math.sqrt(energy / samples.length);
+            const now = Date.now();
+            if (level > 0.024) {
+                loudFrames += 1;
+                lastSoundAt = now;
+                if (!recorder && loudFrames >= 3) beginRecording();
+            } else {
+                loudFrames = 0;
+                if (recorder && level > 0.012) lastSoundAt = now;
+            }
+            if (recorder && now - lastSoundAt > 900) recorder.stop();
+            else if (recorder && now - recordStartedAt > 18000) recorder.stop();
+            requestAnimationFrame(monitor);
+        };
+        const transcribeRecording = async blob => {
+            if (!active || !blob.size) {
+                busy = false;
+                if (active) requestAnimationFrame(monitor);
+                return;
+            }
+            setState("thinking");
+            button.title = "Transcribing your recording on this computer…";
+            const reader = new FileReader();
+            reader.onload = () => {
+                if (!active) {
+                    busy = false;
+                    return;
+                }
+                const encoded = String(reader.result).split(",", 2)[1];
+                if (!encoded) {
+                    active = false;
+                    busy = false;
+                    setState("error");
+                    button.title = "Could not read the microphone recording. Click the orb to retry.";
+                    return;
+                }
+                lastTranscriptionResult = transcriptionResult.value;
+                setInput(audioPayload, encoded);
+                awaitingTranscription = true;
+                window.setTimeout(() => transcribeButton.click(), 100);
+            };
+            reader.onerror = () => {
+                active = false;
+                busy = false;
+                setState("error");
+                button.title = "Could not read the microphone recording. Click the orb to retry.";
+            };
+            reader.readAsDataURL(blob);
+        };
+        const checkTranscription = () => {
+            if (!awaitingTranscription || !transcriptionResult.value || transcriptionResult.value === lastTranscriptionResult) return;
+            awaitingTranscription = false;
+            try {
+                const data = JSON.parse(transcriptionResult.value);
+                if (data.error) throw new Error(data.error);
+                if (!active) {
+                    busy = false;
+                    return;
+                }
+                if (!data.text) {
+                    busy = false;
+                    setState("listening");
+                    button.title = "I didn't catch that. Speak clearly; click the orb to pause.";
+                    requestAnimationFrame(monitor);
+                    return;
+                }
+                setInput(input, data.text);
+                window.setTimeout(() => submit.click(), 100);
+            } catch (error) {
+                active = false;
+                busy = false;
+                stream?.getTracks().forEach(track => track.stop());
+                setState("error");
+                button.title = `${error.message}. Click the orb to retry.`;
+            }
+        };
+        const beginRecording = () => {
+            if (!active || busy || recorder) return;
+            const mimeType = ["audio/webm;codecs=opus", "audio/webm"].find(type => MediaRecorder.isTypeSupported(type));
+            if (!mimeType) {
+                active = false;
+                setState("error");
+                button.title = "This browser cannot record WebM audio. Open the app in current Chrome or Edge.";
+                return;
+            }
+            try {
+                chunks = [];
+                recorder = new MediaRecorder(stream, { mimeType });
+                recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+                recorder.onstop = () => {
+                    const recording = new Blob(chunks, { type: mimeType });
+                    recorder = null;
+                    chunks = [];
+                    busy = true;
+                    transcribeRecording(recording);
+                };
+                recorder.start();
+                busy = true;
+                recordStartedAt = Date.now();
+                lastSoundAt = recordStartedAt;
+                button.title = "Recording your voice…";
+            } catch (error) {
+                recorder = null;
+                active = false;
+                setState("error");
+                button.title = `Could not record microphone audio: ${error.message}. Click to retry.`;
+            }
+        };
+        const startListening = async () => {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                setState("error");
+                button.title = "This browser cannot access a microphone. Open the app in current Chrome or Edge.";
+                return;
+            }
+            button.title = "Waiting for microphone permission…";
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                await audioContext.resume();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                audioContext.createMediaStreamSource(stream).connect(analyser);
+                active = true;
+                busy = false;
+                setState("listening");
+                button.title = "Listening. Speak clearly; click the orb to pause.";
+                requestAnimationFrame(monitor);
+            } catch (error) {
+                active = false;
+                stream?.getTracks().forEach(track => track.stop());
+                setState("error");
+                button.title = error.name === "NotAllowedError"
+                    ? "Microphone permission denied. Allow microphone access in browser site settings, then click the orb."
+                    : `Could not open the microphone: ${error.message}. Check that a microphone is connected.`;
+            }
+        };
+        button.addEventListener("click", () => {
+            if (active) {
+                active = false;
+                busy = false;
+                if (recorder && recorder.state !== "inactive") recorder.stop();
+                stream?.getTracks().forEach(track => track.stop());
+                audioContext?.close();
+                stream = null;
+                analyser = null;
+                recorder = null;
+                window.speechSynthesis?.cancel();
+                setState("idle");
+                button.title = "Click the orb to resume listening.";
+                return;
+            }
+            startListening();
+        });
+        const speakReply = () => {
+            if (!reply.value || reply.value === lastReply) return;
+            lastReply = reply.value;
+            try {
+                const payload = JSON.parse(reply.value);
+                if (!payload.text) return;
+                busy = true;
+                setState("speaking");
+                const utterance = new SpeechSynthesisUtterance(payload.text);
+                utterance.onend = utterance.onerror = () => {
+                    busy = false;
+                    if (active) {
+                        setState("listening");
+                        button.title = "Listening. Speak clearly; click the orb to pause.";
+                        requestAnimationFrame(monitor);
+                    }
+                    else setState("idle");
+                };
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(utterance);
+            } catch (_) {}
+        };
+        window.setInterval(speakReply, 250);
+        window.setInterval(checkTranscription, 200);
+        setState("idle");
+        button.title = "Click to allow microphone access and start local listening.";
+    }"""
+    logo = """
+    <main id="jarvis-voice-ui">
+      <button id="jarvis-orb" type="button" data-state="idle"
+              aria-label="Jarvis microphone. Click to grant permission and start listening."
+              title="Click the orb to allow microphone access and start listening.">
+        <span class="jarvis-ring"></span><span class="jarvis-ring"></span>
+        <span class="jarvis-core" aria-hidden="true">J</span>
+        <svg class="jarvis-mic" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="9" y="2" width="6" height="13" rx="3" fill="currentColor"/>
+          <path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3m-4 0h8"
+                stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </main>
+    """
+    with gr.Blocks(title="JARVIS", css=APP_CSS, fill_height=True) as demo:
+        gr.HTML(logo)
+        voice_input = gr.Textbox(elem_id="jarvis-voice-input")
+        voice_reply = gr.Textbox(elem_id="jarvis-voice-reply")
+        audio_payload = gr.Textbox(elem_id="jarvis-audio-payload")
+        transcription_result = gr.Textbox(elem_id="jarvis-transcription-result")
+        voice_state = gr.State({"pending": None})
+        transcribe = gr.Button("Transcribe audio", elem_id="jarvis-transcribe-button")
+        submit = gr.Button("Submit voice", elem_id="jarvis-voice-submit")
+        transcribe.click(
+            _transcribe_voice_clip,
+            inputs=[audio_payload],
+            outputs=[transcription_result],
+            show_progress="hidden",
         )
-        with gr.Row():
-            ollama_status = gr.Markdown(_ollama_status())
-            memory_status = gr.Markdown(_memory_status())
-
-        with gr.Tabs():
-            with gr.Tab("Chat"):
-                chat = gr.Chatbot(type="messages", height=470, label="Conversation")
-                voice_input = gr.Audio(
-                    sources=["microphone", "upload"],
-                    type="filepath",
-                    label="Voice request (local transcription)",
-                )
-                composer = gr.Textbox(
-                    label="Request",
-                    placeholder="Describe the task. JARVIS will show a plan before acting.",
-                    lines=2,
-                )
-                with gr.Row():
-                    send = gr.Button("Plan", variant="secondary")
-                    do_it = gr.Button("Do it", variant="primary")
-                    clear = gr.Button("Clear")
-                plan_view = gr.Markdown("Send a request to see the proposed plan.")
-                pending_state = gr.State({"pending": None})
-
-                def transcribe_to_composer(audio_path):
-                    if not audio_path:
-                        return ""
-                    from hands import transcribe_audio
-                    try:
-                        return transcribe_audio(audio_path)["text"]
-                    except Exception as exc:
-                        return f"[Transcription failed: {exc}]"
-
-                send.click(_chat_submit, [composer, chat, pending_state], [chat, composer, plan_view, pending_state])
-                composer.submit(_chat_submit, [composer, chat, pending_state], [chat, composer, plan_view, pending_state])
-                voice_input.change(transcribe_to_composer, [voice_input], [composer])
-                do_it.click(_do_it, [chat, pending_state], [chat, plan_view, pending_state])
-                clear.click(
-                    lambda: ([], "Send a request to see the proposed plan.", {"pending": None}),
-                    outputs=[chat, plan_view, pending_state],
-                )
-
-            with gr.Tab("Connections Hub"):
-                build_connections_tab()
-
-            with gr.Tab("Skills"):
-                gr.Markdown("Reusable local workflow recipes created from successful multi-step runs.")
-                skills_view = gr.Markdown(_refresh_skills())
-                refresh_skills = gr.Button("Refresh skills")
-                refresh_skills.click(_refresh_skills, outputs=skills_view)
-
-        with gr.Accordion("JARVIS quick action", open=False, elem_classes=["jarvis-floating-widget"]):
-            quick_request = gr.Textbox(
-                label="Quick request",
-                placeholder="Describe an action to plan",
-                lines=2,
-            )
-            with gr.Row():
-                quick_plan = gr.Button("Plan", variant="secondary")
-                quick_do = gr.Button("Do it", variant="primary")
-            quick_plan.click(
-                _chat_submit,
-                [quick_request, chat, pending_state],
-                [chat, quick_request, plan_view, pending_state],
-            )
-            quick_request.submit(
-                _chat_submit,
-                [quick_request, chat, pending_state],
-                [chat, quick_request, plan_view, pending_state],
-            )
-            quick_do.click(_do_it, [chat, pending_state], [chat, plan_view, pending_state])
-
-        gr.Markdown(
-            "Local-only by default. Review plans before running them; credentials are encrypted on this device."
+        submit.click(
+            _voice_turn,
+            inputs=[voice_input, voice_state],
+            outputs=[voice_reply, voice_state],
+            show_progress="hidden",
         )
+        demo.load(None, js=voice_js, show_progress="hidden")
     return demo
 
 

@@ -55,10 +55,13 @@ class SafetyBoundaryTests(unittest.TestCase):
         tools = agent._load_tools()
         for name in (
             "desktop_click", "desktop_type", "file_list", "file_read", "file_write",
+            "manage_windows", "open_application", "open_url", "search_in_browser",
             "zimbra_email", "gmail", "mysql_query", "ftp_upload", "whatsapp", "github",
             "create_repl", "create_local_project", "list_repls", "update_repl",
             "publish_repl", "live_preview", "make_exe", "install_package",
             "audio_transcribe", "speak_text", "docker_build", "docker_run",
+            "write_project_file", "show_project", "open_demo_url", "search_demo_web",
+            "inspect_demo_page", "click_demo_element", "fill_demo_field",
         ):
             with self.subTest(tool=name):
                 self.assertTrue(callable(tools[name]))
